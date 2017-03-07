@@ -4,17 +4,23 @@ require 'pry-nav'
 class InterpolationExtracter < Parser::Rewriter
   def on_send(node)
     receiver_node, method_name, *arg_nodes = *node
-    if method_name == :_
-      format_hash = process_string(arg_nodes[0])
+    if (method_name == :_) && (arg_nodes[0].type == :dstr)
+      values = extract_interpolations(arg_nodes[0])
+      if !values.empty?
+        insert_after(node.loc.end, " % #{values}")
+      end
     end
     super
   end
 
-  def process_string(node)
+  def extract_interpolations(node)
     # Strings with interpolation are dstr nodes
     return if node.type != :dstr
 
-    interpolated_values = {}
+    # A string representation of the hash argument to the string
+    # format method
+    interpolated_values_string = ""
+    # Used to build placeholder names for complex expressions
     count = 0
     node.children.each do |child|
       # dstrs are split into "str" segments and other segments.
@@ -31,13 +37,19 @@ class InterpolationExtracter < Parser::Rewriter
           hash_key << "#{count}"
           count += 1
         end
-        interpolated_values[hash_key] = value
+        if interpolated_values_string.empty?
+          interpolated_values_string << "{ "
+        end
+        interpolated_values_string << "#{hash_key}: #{value.loc.expression.source}, "
 
         # Replace interpolation with format string
         replace(child.loc.expression, "%{#{hash_key}}")
       end
     end
-    return interpolated_values
+    if !interpolated_values_string.empty?
+      interpolated_values_string << "}"
+    end
+    return interpolated_values_string
   end
 end
 
